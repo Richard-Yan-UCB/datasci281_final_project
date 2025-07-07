@@ -21,7 +21,7 @@ convert to grayscale
 normalize teh image between 0 and 1
 resize image to im_size """
 
-def preprocess_image(img_path, im_size = (450,450)):
+def preprocess_image(img_path, im_size = (512,512)):
     img = cv.imread(img_path)
     img_grayscale = cv.cvtColor(img,cv.COLOR_BGR2GRAY)
     normalized = (img_grayscale - img_grayscale.min())/(img_grayscale.max() - img_grayscale.min())*255
