@@ -26,7 +26,7 @@ def preprocess_image(img_path, im_size=512):
     img = cv.imread(img_path)
     img_grayscale = cv.cvtColor(img,cv.COLOR_BGR2GRAY)
     normalized = normalize_img(img_grayscale)
-    rescaled = rescale_img(img=normalized, standard=im_size)
+    rescaled = rescale_img(img=normalized, standard=im_size) * 255
     return rescaled
 
 def rescale_img(img, standard=256):
