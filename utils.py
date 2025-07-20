@@ -13,9 +13,8 @@ def create_2d_gaussian(size=9, std=1.5):
 
 """ normalize teh image between 0 and 1 """
 def normalize_img(img):
-    normalized = (img - img.min())/(img.max() - img.min())    
+    normalized = (img - img.min())/(img.max() - img.min())   
     return normalized
-
 
 """ 
 convert to grayscale
@@ -26,7 +25,7 @@ def preprocess_image(img_path, im_size=512):
     img = cv.imread(img_path)
     img_grayscale = cv.cvtColor(img,cv.COLOR_BGR2GRAY)
     normalized = normalize_img(img_grayscale)
-    rescaled = rescale_img(img=normalized, standard=im_size) * 255
+    rescaled = rescale_img(img=normalized, standard=im_size)
     return rescaled
 
 def rescale_img(img, standard=256):
