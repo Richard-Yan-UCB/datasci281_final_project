@@ -13,9 +13,8 @@ def create_2d_gaussian(size=9, std=1.5):
 
 """ normalize teh image between 0 and 1 """
 def normalize_img(img):
-    normalized = (img - img.min())/(img.max() - img.min())    
+    normalized = (img - img.min())/(img.max() - img.min())   
     return normalized
-
 
 """ 
 convert to grayscale
