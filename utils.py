@@ -21,6 +21,11 @@ from scipy import stats
 from skimage.feature import hessian_matrix, hessian_matrix_det
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
+from pathlib import Path
+from tqdm import tqdm
+import torch
+from PIL import Image
+from transformers import AutoImageProcessor, AutoModel
      
 """ create a 2-D gaussian blurr filter for a given mean and std """
 def create_2d_gaussian(size=9, std=1.5):
@@ -83,9 +88,9 @@ def summarize_blobs(blobs, image_shape):
 def get_features(in_imgs, feat_name='canny'):
     features = []
     if feat_name == 'canny':
-        for i in range(in_imgs.shape[0]):
+        for i in tqdm(range(in_imgs.shape[0]), desc = 'Canny Edge Images'):
             # Convert to uint8 and apply Canny
-            print("Canny Image: " + str(i))
+            #print("Canny Image: " + str(i))
             image = in_imgs[i]
             img_uint8 = (image * 255).astype(np.uint8)
             edges = cv.Canny(img_uint8, threshold1=50, threshold2=150)
@@ -100,8 +105,8 @@ def get_features(in_imgs, feat_name='canny'):
         # stack extracted hog features into array
         # also save the first hog image for plotting
         max_features = 0
-        for i in range(in_imgs.shape[0]):
-            print("Blob DoG Image:" + str(i))
+        for i in tqdm(range(in_imgs.shape[0]), desc = 'Blob Dog Images'):
+            #print("Blob DoG Image:" + str(i))
             image = in_imgs[i]
             mean_pixel_intensity = np.mean(image)
             brightness_adjusted_img = image.copy()
@@ -152,19 +157,21 @@ def get_features(in_imgs, feat_name='canny'):
                 max_features = blob_dog_final.shape[0]
             # summary_feature = summarize_blobs(blobs_dog_large, image.shape)
             features.append(blob_dog_final)
-
-        for blob_index in range(len(features)):
-            print("Before: " + str(features[blob_index].shape))
+            
+        pbar = tqdm(range(len(features)), desc="Padding Features")
+        for blob_index in pbar:
+        #for blob_index in tqdm(range(len(features)), desc = 'Padding Features'):
+            #print("Before: " + str(features[blob_index].shape))
             if features[blob_index].shape[0] < max_features:
                 features[blob_index] = np.pad(features[blob_index], pad_width=(0,max_features-features[blob_index].shape[0]))
-            print("After: " + str(features[blob_index].shape))
+            #print("After: " + str(features[blob_index].shape))
         features = np.array(features)
         return features
     
     if feat_name == 'blob_doh':
         max_features = 0
-        for i in range(in_imgs.shape[0]):
-            print("DoH Image: " + str(i))
+        for i in tqdm(range(in_imgs.shape[0]), desc = 'Blob DoH images'):
+            #print("DoH Image: " + str(i))
             image = in_imgs[i]
             mean_pixel_intensity = np.mean(image)
             brightness_adjusted_img = image.copy()
@@ -212,17 +219,53 @@ def get_features(in_imgs, feat_name='canny'):
             summary_feature = summarize_blobs(blobs_doh_large, image.shape)
             features.append(blobs_doh_final)
         
-        for blob_index in range(len(features)):
-            print("Before: " + str(features[blob_index].shape))
+        pbar = tqdm(range(len(features)), desc="Padding Features")
+        for blob_index in pbar:
+        #for blob_index in range(len(features)):
+            #print("Before: " + str(features[blob_index].shape))
             if features[blob_index].shape[0] < max_features:
                 features[blob_index] = np.pad(features[blob_index], pad_width=(0,max_features-features[blob_index].shape[0]))
-            print("After: " + str(features[blob_index].shape))
+            #print("After: " + str(features[blob_index].shape))
 
         features = np.array(features)
         return features
     
-    # if feat_name == "complex":
+    if feat_name == "complex":
+        if in_imgs.ndim == 3:  #(N, H, W)
+            in_imgs = np.expand_dims(in_imgs, axis=-1)  # (N, H, W, 1)
+            #Convert grayscale (single-channel) to RGB (3 channels)
+        if in_imgs.shape[-1] == 1:
+            in_imgs = np.repeat(in_imgs, 3, axis=-1)
+        model_name = "facebook/dinov2-base"
+        fp16 = True 
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        processor = AutoImageProcessor.from_pretrained(model_name)
+        model = AutoModel.from_pretrained(
+            model_name,
+            torch_dtype = torch.float16 if fp16 else None
+            ).eval().to(device)
+        model_dtype = next(model.parameters()).dtype
+        hidden_size = model.config.hidden_size
         
+        N = len(in_imgs)
+        features = torch.empty(N, hidden_size, dtype=torch.float32)
+        
+        step = 64 # btach_size
+        
+        with torch.no_grad(), torch.autocast('cuda', enabled=fp16):
+            for start in tqdm(range(0, N, step), desc = 'Complex Features'):
+                end = min(start + step, N)
+                batch = in_imgs[start:end]
+                inputs = processor(batch, return_tensors="pt")
+                inputs = {k: v.to(device, dtype=model_dtype) for k, v in inputs.items()}
+                feats = model(**inputs).last_hidden_state[:, 0] #before the last layer
+                features[start:end] = feats.float().cpu()
+                
+                #print(f"\rExtracted: {end}/{N}", end="", flush=True)
+                
+            print(f"\nFeature tensor shape: {tuple(features.shape)}")
+        
+        return features
 
     return None
 
@@ -241,8 +284,8 @@ def plot_PCA(X_list, n_components=[15,15,100]):
     pca_list, xpca_list = get_PCA(X_list, n_components=n_components)
 
     plt.figure(figsize=(15,5))
-    colors = ['r-', 'b-','g-']
-    labels = ['dog features', 'doh features','canny_features']
+    colors = ['r-', 'b-','g-','p-']
+    labels = ['dog features', 'doh features','canny_features','complex_features']
     for i in range(len(X_list)):
         plt.plot(np.cumsum(pca_list[i].explained_variance_ratio_), colors[i], label=labels[i])
         plt.xticks(np.linspace(0, n_components[i]+1, 50))
