@@ -16,7 +16,7 @@ from skimage.filters import gaussian
 from skimage.exposure import rescale_intensity
 from skimage.transform import rescale, rotate
 from skimage.color import rgb2gray
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_squared_error, roc_curve, auc
 from scipy import stats
 from skimage.feature import hessian_matrix, hessian_matrix_det
 from sklearn.decomposition import PCA
@@ -26,7 +26,16 @@ from tqdm import tqdm
 import torch
 from PIL import Image
 from transformers import AutoImageProcessor, AutoModel
-     
+from sklearn.model_selection import GridSearchCV
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn import svm
+from sklearn.linear_model import LogisticRegression
+from sklearn import metrics
+import time
+from xgboost import XGBClassifier
+from sklearn.preprocessing import label_binarize
+
+
 """ create a 2-D gaussian blurr filter for a given mean and std """
 def create_2d_gaussian(size=9, std=1.5):
     gaussian_1d = signal.windows.gaussian(size,std=std)
@@ -62,7 +71,7 @@ def rescale_img(img, standard=256):
 
 def summarize_blobs(blobs, image_shape):
     if len(blobs) == 0:
-        return np.zeros(16)
+        return np.zeros(14)
     
     y, x, r = blobs[:, 0], blobs[:, 1], blobs[:, 2]
     h, w = image_shape
@@ -77,8 +86,7 @@ def summarize_blobs(blobs, image_shape):
         len(blobs) / (h * w),              # blob density
         np.mean(y_norm), np.std(y_norm), np.min(y_norm), np.max(y_norm),
         np.mean(x_norm), np.std(x_norm), np.min(x_norm), np.max(x_norm),
-        np.mean(r_norm), np.std(r_norm), np.min(r_norm), np.max(r_norm),
-        np.mean(r_norm) / np.mean([np.std(y_norm), np.std(x_norm)])  # compactness
+        np.mean(r_norm), np.std(r_norm), np.min(r_norm), np.max(r_norm)
     ]
 
 
@@ -89,8 +97,6 @@ def get_features(in_imgs, feat_name='canny'):
     features = []
     if feat_name == 'canny':
         for i in tqdm(range(in_imgs.shape[0]), desc = 'Canny Edge Images'):
-            # Convert to uint8 and apply Canny
-            #print("Canny Image: " + str(i))
             image = in_imgs[i]
             img_uint8 = (image * 255).astype(np.uint8)
             edges = cv.Canny(img_uint8, threshold1=50, threshold2=150)
@@ -138,7 +144,7 @@ def get_features(in_imgs, feat_name='canny'):
 
             # Apply DoG
             large_low_sigma, large_high_sigma = 30, 40
-            small_low_sigma, small_high_sigma = 20, 30
+            # small_low_sigma, small_high_sigma = 20, 30
             # dog_image_large_blobs = difference_of_gaussians(img_masked, large_low_sigma, large_high_sigma)
             # dog_image_small_blobs = difference_of_gaussians(img_masked, small_low_sigma, small_high_sigma)
             # blobs_dog_small = blob_dog(img_masked, min_sigma=small_low_sigma, max_sigma=small_high_sigma, threshold=0.078)
@@ -152,19 +158,16 @@ def get_features(in_imgs, feat_name='canny'):
             # dog_image_small_blobs_rescaled = exposure.rescale_intensity(dog_image_small_blobs, in_range=(0, 0.3))
 
 
-            blob_dog_final = blobs_dog_large.flatten()
-            if blob_dog_final.shape[0] > max_features:
-                max_features = blob_dog_final.shape[0]
-            # summary_feature = summarize_blobs(blobs_dog_large, image.shape)
-            features.append(blob_dog_final)
+            # blob_dog_final = blobs_dog_large.flatten()
+            # if blob_dog_final.shape[0] > max_features:
+            #     max_features = blob_dog_final.shape[0]
+            summary_feature = summarize_blobs(blobs_dog_large, image.shape)
+            features.append(summary_feature)
             
-        pbar = tqdm(range(len(features)), desc="Padding Features")
-        for blob_index in pbar:
-        #for blob_index in tqdm(range(len(features)), desc = 'Padding Features'):
-            #print("Before: " + str(features[blob_index].shape))
-            if features[blob_index].shape[0] < max_features:
-                features[blob_index] = np.pad(features[blob_index], pad_width=(0,max_features-features[blob_index].shape[0]))
-            #print("After: " + str(features[blob_index].shape))
+        # pbar = tqdm(range(len(features)), desc="Padding Features")
+        # for blob_index in pbar:
+        #     if features[blob_index].shape[0] < max_features:
+        #         features[blob_index] = np.pad(features[blob_index], pad_width=(0,max_features-features[blob_index].shape[0]))
         features = np.array(features)
         return features
     
@@ -208,24 +211,21 @@ def get_features(in_imgs, feat_name='canny'):
             # blobs_doh_small = blob_doh(img_masked, min_sigma=small_low_sigma, max_sigma=small_high_sigma, threshold=0.002)
             # blobs_doh_small[:, 2] = blobs_doh_small[:, 2] * np.sqrt(2)
             blobs_doh_large = blob_doh(img_masked, min_sigma=large_low_sigma, max_sigma=large_high_sigma, threshold=0.0015)
-            # blobs_doh_large[:, 2] = blobs_doh_large[:, 2] * np.sqrt(2)
+            blobs_doh_large[:, 2] = blobs_doh_large[:, 2] * np.sqrt(2)
             # # Rescale for better display
             # doh_image_large_blobs_rescaled = exposure.rescale_intensity(doh_image_large_blobs, in_range=(0, 0.0001))
             # doh_image_small_blobs_rescaled = exposure.rescale_intensity(doh_image_small_blobs, in_range=(0, 0.0001))
 
-            blobs_doh_final = blobs_doh_large.flatten()
-            if blobs_doh_final.shape[0] > max_features:
-                max_features = blobs_doh_final.shape[0]
+            # blobs_doh_final = blobs_doh_large.flatten()
+            # if blobs_doh_final.shape[0] > max_features:
+            #     max_features = blobs_doh_final.shape[0]
             summary_feature = summarize_blobs(blobs_doh_large, image.shape)
-            features.append(blobs_doh_final)
+            features.append(summary_feature)
         
-        pbar = tqdm(range(len(features)), desc="Padding Features")
-        for blob_index in pbar:
-        #for blob_index in range(len(features)):
-            #print("Before: " + str(features[blob_index].shape))
-            if features[blob_index].shape[0] < max_features:
-                features[blob_index] = np.pad(features[blob_index], pad_width=(0,max_features-features[blob_index].shape[0]))
-            #print("After: " + str(features[blob_index].shape))
+        # pbar = tqdm(range(len(features)), desc="Padding Features")
+        # for blob_index in pbar:
+        #     if features[blob_index].shape[0] < max_features:
+        #         features[blob_index] = np.pad(features[blob_index], pad_width=(0,max_features-features[blob_index].shape[0]))
 
         features = np.array(features)
         return features
@@ -304,3 +304,145 @@ def get_tsne(X_list, n_components=2):
     X_tsne = tsne.fit_transform(X)
     xtsne_list.append(X_tsne)
   return xtsne_list
+
+
+def train_model(X_train, y_train, classes, model_type='logistic', feature='canny'):
+
+    if model_type =='logistic':
+        model = LogisticRegression(multi_class='multinomial',solver='lbfgs',max_iter=1000)
+        start_time = time.perf_counter()
+        model.fit(X_train,y_train)
+        end_time = time.perf_counter()
+        elapsed_time = end_time - start_time
+        y_model_pred = model.predict(X_train)
+        y_model_pred_proba = model.predict_proba(X_train)
+
+    elif model_type =='svm':
+        svm_param_grid = {
+            'C': [0.1],
+            'gamma': [0.001,0.1,1],
+            'kernel': ['rbf']
+        }
+        svc = svm.SVC(probability=True)
+        model = GridSearchCV(svc, svm_param_grid, scoring='accuracy', cv=5, verbose=2)
+        start_time = time.perf_counter()
+        model.fit(X_train,y_train)
+        elapsed_time = end_time - start_time
+        y_model_pred = model.best_estimator_.predict(X_train)
+        y_model_pred_proba = model.best_estimator_.predict_proba(X_train)
+
+    elif model_type =='gbm':
+        gbm_param_grid = {'loss':['log_loss'],
+                'learning_rate':[0.1],
+                'n_estimators':[80,100,120],
+                'max_depth':[2,3,4]}
+        
+        gbm = GradientBoostingClassifier()
+        model = GridSearchCV(gbm, gbm_param_grid, scoring='accuracy',cv=5, verbose=1)
+        start_time = time.perf_counter()
+        model.fit(X_train,y_train)
+        end_time = time.perf_counter()
+        elapsed_time = end_time - start_time
+        y_model_pred = model.best_estimator_.predict(X_train)
+        y_model_pred_proba = model.best_estimator_.predict_proba(X_train)
+
+        print(str(model.best_params_))
+        print(str(model.score(X_train,y_train)))
+        
+    elif model_type =='xgboost':
+        params = {'learning_rate':[0.09, 0.1,0.11],
+                'n_estimators':[80,90,100,110],
+                'max_depth':[2,3,4]}
+
+        xgb_model = XGBClassifier()
+
+        # Fit model
+        # Use GridSearch to find the best parameters
+        model = GridSearchCV(xgb_model, params, cv=5, scoring='accuracy',verbose=1)
+        start_time = time.perf_counter()
+        model.fit(X_train, y_train)
+        end_time = time.perf_counter()
+        elapsed_time = end_time - start_time
+        y_model_pred = model.best_estimator_.predict(X_train)
+        y_model_pred_proba = model.best_estimator_.predict_proba(X_train)
+
+    # elif model_type == 'lda':
+
+
+    # Generate Confusion Matrix for Logistic Regression
+    confusion_matrix = metrics.confusion_matrix(y_train, y_model_pred)
+    cm_display = metrics.ConfusionMatrixDisplay(confusion_matrix = confusion_matrix, display_labels = classes)
+    cm_display.plot()
+    plt.title('CM Feature:' + str(feature) + ' Model: ' + str(model_type))
+    plt.show()
+
+    # # Handle classifier output format
+    # if isinstance(y_model_pred_proba, list):
+    #     # Convert list of class-wise predictions to proper array
+    y_train_binarized = label_binarize(y_train, classes=[0,1,2,3])
+
+    if isinstance(y_model_pred_proba, list):
+        y_model_pred_proba = np.stack([score[:, 1] for score in y_model_pred_proba], axis=1)
+    print(y_model_pred_proba.shape)
+
+    # Generate ROC Curve
+    fpr = dict()
+    tpr = dict()
+    roc_auc = dict()
+
+    for i in range(len(classes)):
+        fpr[i], tpr[i], _ = roc_curve(y_train_binarized[:, i], y_model_pred_proba[:, i])
+        roc_auc[i] = auc(fpr[i], tpr[i])
+
+    plt.figure(figsize=(8, 6))
+    colors = ['blue', 'green', 'red','brown']
+    for i in range(len(classes)):
+        plt.plot(fpr[i], tpr[i], color=colors[i],
+                label=f'Class {classes[i]} (AUC = {roc_auc[i]:.2f})')
+
+    plt.plot([0, 1], [0, 1], 'k--', label='Random chance')
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('ROC Curve Feature:' + str(feature) + ' Model: ' + str(model_type))
+    plt.legend(loc='lower right')
+    plt.grid(True)
+    plt.show()
+
+    accuracy_score = metrics.accuracy_score(y_train, y_model_pred)
+    macro_precision = metrics.precision_score(y_train, y_model_pred,average ='macro')
+    macro_recall = metrics.recall_score(y_train, y_model_pred,average='macro')
+    macro_f1 = metrics.f1_score(y_train, y_model_pred,average='macro')
+    micro_precision = metrics.precision_score(y_train, y_model_pred,average='micro')
+    micro_recall = metrics.recall_score(y_train, y_model_pred,average='micro')
+    micro_f1 = metrics.f1_score(y_train, y_model_pred,average='micro')
+    # fpr, tpr, thresholds = metrics.roc_curve(y_train, y_logistic_pred_dog)
+    # roc_auc = metrics.auc(fpr, tpr)
+    # display = metrics.RocCurveDisplay(fpr=fpr, tpr=tpr, roc_auc=roc_auc,
+    #                                   name='dog estimator')
+
+    # print("==================" + str(feature) + " TRAINING METRICS ===================")
+    # print("Accuracy Score: " + str(accuracy_score))
+    # print("Macro Precision: " + str(macro_precision))
+    # print("Macro Recall: " + str(macro_recall))
+    # print("Macro F1: " + str(macro_f1))
+    # print("Micro Precision: " + str(micro_precision))
+    # print("Micro Recall: " + str(micro_recall))
+    # print("Micro F1: " + str(micro_f1))
+
+    results_dict = {}
+    results_dict['feature'] = feature
+    results_dict['model_type'] = model_type
+    results_dict['accuracy_score'] = accuracy_score
+    results_dict['macro_precision'] = macro_precision
+    results_dict['macro_recall'] = macro_recall
+    results_dict['macro_f1'] = macro_f1
+    results_dict['micro_precision'] = micro_precision
+    results_dict['micro_recall'] = micro_recall
+    results_dict['micro_f1'] = micro_f1
+    results_dict['training_time'] = elapsed_time
+
+
+    if model_type == 'logistic':
+        return model, results_dict
+    elif model_type == 'svm' or model_type == 'gbm':
+        return model.best_estimator_, results_dict
