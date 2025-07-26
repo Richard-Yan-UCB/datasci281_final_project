@@ -1,3 +1,7 @@
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import Dict, List, Tuple, Any, Optional
+import joblib
 from scipy import signal
 import numpy as np
 import cv2 as cv
@@ -34,7 +38,6 @@ from sklearn import metrics
 import time
 from xgboost import XGBClassifier
 from sklearn.preprocessing import label_binarize
-
 
 """ create a 2-D gaussian blurr filter for a given mean and std """
 def create_2d_gaussian(size=9, std=1.5):
@@ -88,12 +91,186 @@ def summarize_blobs(blobs, image_shape):
         np.mean(x_norm), np.std(x_norm), np.min(x_norm), np.max(x_norm),
         np.mean(r_norm), np.std(r_norm), np.min(r_norm), np.max(r_norm)
     ]
-
-
     return np.array(features)
 
 
-def get_features(in_imgs, feat_name='canny'):
+
+#============== Complex feature ====================================
+''' Complex Features '''
+
+
+''' Container returned by 'complex' loader 
+    Ouput: featureBundle thats fully populated with all below and prints summary'''
+@dataclass
+class FeatureBundle:
+    X: np.ndarray            # (N, D) float32
+    y: Optional[np.ndarray]  # (N,) int64 or None
+    paths: List[str] #original sample paths
+    label2id: Dict[str, int] # mapping from string lbl -> class ID
+    id2label: Dict[int, str] # inverse mapping from class ID -> string label
+    path2label: Dict[str, str] #mapping from path -> string lable
+    mismatches: List[Tuple[int, str, str, int, str]] #rows where y[i] mismatch with path2label[paths[i]]
+    class_counts: Dict[str, int] # per class sample counts
+    target_label_indices: List[int] #indices in paths belong to target_label
+    target_label_ok: bool # Sanity check
+
+
+def _load_features_from_joblib(
+    joblib_path: str,
+    label2id: Optional[Dict[str, int]],
+    sort_within_label: bool,
+    global_sort: bool,
+) -> Tuple[np.ndarray, np.ndarray, List[str], Dict[int, str], Dict[str, int]]:
+    data: Any = joblib.load(joblib_path)
+
+    # Packed dict format
+    if isinstance(data, dict) and "X" in data and "y" in data:
+        X = np.asarray(data["X"], dtype=np.float32)
+        y = np.asarray(data["y"], dtype=np.int64)
+        paths = list(data.get("paths", [f"sample_{i}" for i in range(len(X))]))
+        if "label2id" in data and isinstance(data["label2id"], dict):
+            label2id_local = {str(k): int(v) for k, v in data["label2id"].items()}
+        elif "id2label" in data and isinstance(data["id2label"], dict):
+            id2label_local = {int(k): str(v) for k, v in data["id2label"].items()}
+            label2id_local = {v: k for k, v in id2label_local.items()}
+        else:
+            if label2id is None:
+                uniq = sorted(set(int(i) for i in y))
+                label2id_local = {str(i): i for i in uniq}
+            else:
+                label2id_local = dict(label2id)
+        id2label_local = {i: lab for lab, i in label2id_local.items()}
+        return X, y, paths, id2label_local, label2id_local
+
+    # Nested dict {label: {path: vec}}
+    if not (isinstance(data, dict) and all(isinstance(v, dict) for v in data.values())):
+        raise ValueError("Unsupported joblib format. Expected packed dict or nested {label:{path:vec}}.")
+
+    labels_in_file = sorted(data.keys())
+    label2id_local = dict(label2id) if label2id is not None else {lab: i for i, lab in enumerate(labels_in_file)}
+    id2label_local = {i: lab for lab, i in label2id_local.items()}
+
+    feats_list: List[np.ndarray] = []
+    y_list: List[int] = []
+    paths_list: List[str] = []
+
+    if not global_sort:
+        for lab in labels_in_file:
+            items = data[lab].items()
+            if sort_within_label:
+                items = sorted(items, key=lambda kv: kv[0])
+            for path, vec in items:
+                arr = np.asarray(vec, dtype=np.float32)
+                feats_list.append(arr)
+                y_list.append(label2id_local[lab])
+                paths_list.append(path)
+    else:
+        all_items = []
+        for lab, d in data.items():
+            for path, vec in d.items():
+                all_items.append((path, lab, vec))
+        all_items.sort(key=lambda x: x[0])
+        for path, lab, vec in all_items:
+            arr = np.asarray(vec, dtype=np.float32)
+            feats_list.append(arr)
+            y_list.append(label2id_local[lab])
+            paths_list.append(path)
+
+    if not feats_list:
+        raise ValueError("No features found in joblib file.")
+    D = feats_list[0].shape[0]
+    for i, a in enumerate(feats_list):
+        if a.shape[0] != D:
+            raise ValueError(f"Feature length mismatch at index {i}: got {a.shape[0]}, expected {D}")
+
+    X = np.vstack(feats_list).astype(np.float32)
+    y = np.asarray(y_list, dtype=np.int64)
+    return X, y, paths_list, id2label_local, label2id_local
+
+
+def _build_path2label(joblib_path: str) -> Dict[str, str]:
+    obj = joblib.load(joblib_path)
+    # Nested
+    if isinstance(obj, dict) and "X" not in obj and all(isinstance(v, dict) for v in obj.values()):
+        return {p: lab for lab, dd in obj.items() for p in dd.keys()}
+    # Packed
+    if isinstance(obj, dict) and "paths" in obj and "y" in obj:
+        paths = list(obj["paths"])
+        y     = np.asarray(obj["y"]).astype(int)
+        if "id2label" in obj and isinstance(obj["id2label"], dict):
+            id2label_local = {int(k): v for k, v in obj["id2label"].items()}
+        elif "label2id" in obj and isinstance(obj["label2id"], dict):
+            id2label_local = {int(v): k for k, v in obj["label2id"].items()}
+        else:
+            ids = sorted(set(int(i) for i in y))
+            id2label_local = {i: str(i) for i in ids}
+        return {p: id2label_local[int(cls)] for p, cls in zip(paths, y)}
+    raise ValueError("Unsupported joblib format.")
+
+def combine_load_and_validate_joblib(
+    joblib_path: str,
+    label2id: Optional[Dict[str, int]] = None,
+    sort_within_label: bool = True,
+    global_sort: bool = False,
+    target_label: str = "glioma",
+    assert_on_mismatch: bool = False,
+) -> FeatureBundle:
+    X, y, paths, id2label_out, label2id_out = _load_features_from_joblib(
+        joblib_path, label2id, sort_within_label, global_sort
+    )
+    path2label = _build_path2label(joblib_path)
+
+    mismatches: List[Tuple[int, str, str, int, str]] = []
+    for i, p in enumerate(paths):
+        lab = path2label.get(p)
+        if lab is None:
+            mismatches.append((i, p, "<missing in joblib>", int(y[i]), id2label_out[int(y[i])]))
+        else:
+            expected = int(label2id_out[lab])
+            if int(y[i]) != expected:
+                mismatches.append((i, p, lab, int(y[i]), id2label_out[int(y[i])]))
+
+    target_label_indices: List[int] = []
+    target_label_ok = True
+    if target_label in label2id_out:
+        t_id = int(label2id_out[target_label])
+        target_label_indices = [i for i, p in enumerate(paths) if path2label.get(p) == target_label]
+        target_label_ok = all(int(y[i]) == t_id for i in target_label_indices)
+
+    uniq, cnt = np.unique(y.astype(int), return_counts=True)
+    class_counts = {id2label_out[int(i)]: int(c) for i, c in zip(uniq, cnt)}
+
+    print(f"Loaded: X={X.shape}, y={y.shape}, paths={len(paths)}")
+    print("Class counts:", class_counts)
+    print("Mismatches:", len(mismatches))
+    if target_label in label2id_out:
+        print(f"{target_label!r} indices sample:", target_label_indices[:5])
+        if not target_label_ok:
+            print(f"Some '{target_label}' rows have mismatched ids.")
+    if assert_on_mismatch and mismatches:
+        raise AssertionError(f"Found {len(mismatches)} label mismatches.")
+
+    return FeatureBundle(
+        X=X, y=y, paths=paths, label2id=label2id_out, id2label=id2label_out,
+        path2label=path2label, mismatches=mismatches, class_counts=class_counts,
+        target_label_indices=target_label_indices, target_label_ok=target_label_ok
+    )
+
+# ================================== End of Complex feat ======================================
+
+
+
+
+
+def get_features(in_imgs: Optional[np.ndarray], 
+                 feat_name='canny',
+                 *,
+                 joblib_path: Optional[str] = None,
+                 label2id: Optional[Dict[str, int]] = None,
+                 sort_within_label: bool = True,
+                 global_sort: bool = False,
+                 target_label: str = "glioma",
+                 return_bundle: bool = False):
     features = []
     if feat_name == 'canny':
         for i in tqdm(range(in_imgs.shape[0]), desc = 'Canny Edge Images'):
@@ -230,42 +407,24 @@ def get_features(in_imgs, feat_name='canny'):
         features = np.array(features)
         return features
     
-    if feat_name == "complex":
-        if in_imgs.ndim == 3:  #(N, H, W)
-            in_imgs = np.expand_dims(in_imgs, axis=-1)  # (N, H, W, 1)
-            #Convert grayscale (single-channel) to RGB (3 channels)
-        if in_imgs.shape[-1] == 1:
-            in_imgs = np.repeat(in_imgs, 3, axis=-1)
-        model_name = "facebook/dinov2-base"
-        fp16 = True 
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        processor = AutoImageProcessor.from_pretrained(model_name)
-        model = AutoModel.from_pretrained(
-            model_name,
-            torch_dtype = torch.float16 if fp16 else None
-            ).eval().to(device)
-        model_dtype = next(model.parameters()).dtype
-        hidden_size = model.config.hidden_size
+    if feat_name == 'complex':
+        """ ignores in_imgs, requires joblib_path 
+        returns all components from dataclass
         
-        N = len(in_imgs)
-        features = torch.empty(N, hidden_size, dtype=torch.float32)
+        ex call : bundle = get_features(None, "complex", joblib_path="/content/features.joblib", return_bundle=True)
+        X, y = bundle.X, bundle.y"""
         
-        step = 64 # btach_size
+        if not joblib_path:
+            raise ValueError("joblib_path is required when feat_name='complex'.")
+        bundle = combine_load_and_validate_joblib(
+            joblib_path=joblib_path,
+            label2id=label2id,
+            sort_within_label=sort_within_label,
+            global_sort=global_sort,
+            target_label=target_label,
+        )
+        return bundle if return_bundle else bundle.X
         
-        with torch.no_grad(), torch.autocast('cuda', enabled=fp16):
-            for start in tqdm(range(0, N, step), desc = 'Complex Features'):
-                end = min(start + step, N)
-                batch = in_imgs[start:end]
-                inputs = processor(batch, return_tensors="pt")
-                inputs = {k: v.to(device, dtype=model_dtype) for k, v in inputs.items()}
-                feats = model(**inputs).last_hidden_state[:, 0] #before the last layer
-                features[start:end] = feats.float().cpu()
-                
-                #print(f"\rExtracted: {end}/{N}", end="", flush=True)
-                
-            print(f"\nFeature tensor shape: {tuple(features.shape)}")
-        
-        return features
 
     return None
 
