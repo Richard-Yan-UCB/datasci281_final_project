@@ -31,7 +31,7 @@ import torch
 from PIL import Image
 from transformers import AutoImageProcessor, AutoModel
 from sklearn.model_selection import GridSearchCV
-from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn import svm
 from sklearn.linear_model import LogisticRegression
 from sklearn import metrics
@@ -525,6 +525,23 @@ def train_model(X_train, y_train, classes, model_type='logistic', feature='canny
         y_model_pred = model.best_estimator_.predict(X_train)
         y_model_pred_proba = model.best_estimator_.predict_proba(X_train)
 
+    elif model_type == 'rf':
+        params = {
+        'n_estimators':[80,90,100,110],
+        'max_depth':[2,3,4],
+        'max_features':['sqrt','log2']
+        }
+
+        rf_model = RandomForestClassifier()
+
+        model = GridSearchCV(rf_model, params, cv=5, scoring='accuracy',verbose=1)
+        start_time = time.perf_counter()
+        model.fit(X_train, y_train)
+        end_time = time.perf_counter()
+        elapsed_time = end_time - start_time
+        y_model_pred = model.best_estimator_.predict(X_train)
+        y_model_pred_proba = model.best_estimator_.predict_proba(X_train)
+
     # elif model_type == 'lda':
 
 
@@ -603,7 +620,7 @@ def train_model(X_train, y_train, classes, model_type='logistic', feature='canny
 
     if model_type == 'logistic':
         return model, results_dict
-    elif model_type == 'svm' or model_type == 'gbm':
+    elif model_type in ('svm', 'gbm', 'xgboost', 'rf'):
         return model.best_estimator_, results_dict
 
 
@@ -673,3 +690,35 @@ def test_model(model, X_test_feature, Y_test, classes, model_type='logistic', fe
     results_dict['inference_time'] = elapsed_time
 
     return results_dict
+
+
+def save_models(feature_model_dict, model_path_prefix):
+    """
+    Saves sklearn model(s) from feature_model_dict to path(s) with specified model_path_prefix.
+    Args:
+        feature_model_dict: dictionary of feature types to sklearn models. e.g. {'canny', canny_logistic_model, 'complex': complex_logistic_model}
+        model_path_prefix: file path prefix to identify model(s) being saved. e.g. "logistic_model". 
+    """
+    for feature in feature_model_dict.keys():
+        model = feature_model_dict[feature]
+        path = f"{model_path_prefix}_{feature}.joblib"
+        joblib.dump(model, path)
+        print(f"saved model={model} for feature={feature} to path={path}")
+
+
+def load_models(feature_list, model_path_prefix):
+    """
+    Loads sklearn model(s) to feature_model_dict from path(s) with specified model_path_prefix.
+    Args:
+        feature_list: list of feature type(s) to load model(s) for
+        model_path_prefix: file path prefix to identify model(s) being loaded. e.g. "logistic_model".
+    Returns:
+        feature_model_dict: dictionary of feature types to sklearn models. e.g. {'canny', canny_logistic_model, 'complex': complex_logistic_model}
+    """
+    feature_model_dict = {}
+    for feature in feature_list:
+        path = f"{model_path_prefix}_{feature}.joblib"
+        feature_model_dict[feature] = joblib.load(path)
+        print(f"loaded model={feature_model_dict[feature]} for feature={feature} from path={path}")
+    return feature_model_dict
+
