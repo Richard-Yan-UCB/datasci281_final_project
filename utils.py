@@ -480,12 +480,13 @@ def train_model(X_train, y_train, classes, model_type='logistic', feature='canny
         svm_param_grid = {
             'C': [0.1],
             'gamma': [0.001,0.1,1],
-            'kernel': ['rbf']
+            'kernel': ['rbf','linear']
         }
         svc = svm.SVC(probability=True)
         model = GridSearchCV(svc, svm_param_grid, scoring='accuracy', cv=5, verbose=2)
         start_time = time.perf_counter()
         model.fit(X_train,y_train)
+        end_time = time.perf_counter()
         elapsed_time = end_time - start_time
         y_model_pred = model.best_estimator_.predict(X_train)
         y_model_pred_proba = model.best_estimator_.predict_proba(X_train)
@@ -509,7 +510,7 @@ def train_model(X_train, y_train, classes, model_type='logistic', feature='canny
         print(str(model.score(X_train,y_train)))
         
     elif model_type =='xgboost':
-        params = {'learning_rate':[0.09, 0.1,0.11],
+        params = {'learning_rate':[0.05, 0.1,0.15],
                 'n_estimators':[80,90,100,110],
                 'max_depth':[2,3,4]}
 
