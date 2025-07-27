@@ -702,7 +702,7 @@ def save_models(feature_model_dict, model_path_prefix):
     """
     for feature in feature_model_dict.keys():
         model = feature_model_dict[feature]
-        path = f"{model_path_prefix}_{feature}.joblib"
+        path = f"{model_path_prefix}/"+f"{feature}.joblib"
         joblib.dump(model, path)
         print(f"saved model={model} for feature={feature} to path={path}")
 
