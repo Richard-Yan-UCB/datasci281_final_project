@@ -622,3 +622,103 @@ def train_model(X_train, y_train, classes, model_type='logistic', feature='canny
         return model, results_dict
     elif model_type in ('svm', 'gbm', 'xgboost', 'rf'):
         return model.best_estimator_, results_dict
+
+
+
+def test_model(model, X_test_feature, Y_test, classes, model_type='logistic', feature='canny'):
+    start_time = time.perf_counter()
+    Y_test_predict = model.predict(X_test_feature)
+    Y_test_predict_proba = model.predict_proba(X_test_feature)
+    end_time = time.perf_counter()
+    elapsed_time = end_time - start_time
+    confusion_matrix = metrics.confusion_matrix(Y_test, Y_test_predict)
+    cm_display = metrics.ConfusionMatrixDisplay(confusion_matrix = confusion_matrix, display_labels = classes)
+    cm_display.plot()
+    plt.title("CM Model: " + str(model_type) + " Feature: " + str(feature))
+    plt.show()
+
+
+    y_test_binarized = label_binarize(Y_test, classes=[0,1,2,3])
+
+    if isinstance(Y_test_predict_proba, list):
+        Y_test_predict_proba = np.stack([score[:, 1] for score in Y_test_predict_proba], axis=1)
+    print(Y_test_predict_proba.shape)
+
+    # Generate ROC Curve
+    fpr = dict()
+    tpr = dict()
+    roc_auc = dict()
+
+    for i in range(len(classes)):
+        fpr[i], tpr[i], _ = roc_curve(y_test_binarized[:, i], Y_test_predict_proba[:, i])
+        roc_auc[i] = auc(fpr[i], tpr[i])
+
+    plt.figure(figsize=(8, 6))
+    colors = ['blue', 'green', 'red','brown']
+    for i in range(len(classes)):
+        plt.plot(fpr[i], tpr[i], color=colors[i],
+                label=f'Class {classes[i]} (AUC = {roc_auc[i]:.2f})')
+
+    plt.plot([0, 1], [0, 1], 'k--', label='Random chance')
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('ROC Curve Feature:' + str(feature) + ' Model: ' + str(model_type))
+    plt.legend(loc='lower right')
+    plt.grid(True)
+    plt.show()
+
+
+
+    accuracy_score = metrics.accuracy_score(Y_test, Y_test_predict)
+    macro_precision = metrics.precision_score(Y_test, Y_test_predict,average ='macro')
+    macro_recall = metrics.recall_score(Y_test, Y_test_predict,average='macro')
+    macro_f1 = metrics.f1_score(Y_test, Y_test_predict,average='macro')
+    micro_precision = metrics.precision_score(Y_test, Y_test_predict,average='micro')
+    micro_recall = metrics.recall_score(Y_test, Y_test_predict,average='micro')
+    micro_f1 = metrics.f1_score(Y_test, Y_test_predict,average='micro')
+
+    results_dict = {}
+    results_dict['feature'] = feature
+    results_dict['model_type'] = model_type
+    results_dict['accuracy_score'] = accuracy_score
+    results_dict['macro_precision'] = macro_precision
+    results_dict['macro_recall'] = macro_recall
+    results_dict['macro_f1'] = macro_f1
+    results_dict['micro_precision'] = micro_precision
+    results_dict['micro_recall'] = micro_recall
+    results_dict['micro_f1'] = micro_f1
+    results_dict['inference_time'] = elapsed_time
+
+    return results_dict
+
+
+def save_models(feature_model_dict, model_path_prefix):
+    """
+    Saves sklearn model(s) from feature_model_dict to path(s) with specified model_path_prefix.
+    Args:
+        feature_model_dict: dictionary of feature types to sklearn models. e.g. {'canny', canny_logistic_model, 'complex': complex_logistic_model}
+        model_path_prefix: file path prefix to identify model(s) being saved. e.g. "logistic_model". 
+    """
+    for feature in feature_model_dict.keys():
+        model = feature_model_dict[feature]
+        path = f"{model_path_prefix}_{feature}.joblib"
+        joblib.dump(model, path)
+        print(f"saved model={model} for feature={feature} to path={path}")
+
+
+def load_models(feature_list, model_path_prefix):
+    """
+    Loads sklearn model(s) to feature_model_dict from path(s) with specified model_path_prefix.
+    Args:
+        feature_list: list of feature type(s) to load model(s) for
+        model_path_prefix: file path prefix to identify model(s) being loaded. e.g. "logistic_model".
+    Returns:
+        feature_model_dict: dictionary of feature types to sklearn models. e.g. {'canny', canny_logistic_model, 'complex': complex_logistic_model}
+    """
+    feature_model_dict = {}
+    for feature in feature_list:
+        path = f"{model_path_prefix}_{feature}.joblib"
+        feature_model_dict[feature] = joblib.load(path)
+        print(f"loaded model={feature_model_dict[feature]} for feature={feature} from path={path}")
+    return feature_model_dict
+
