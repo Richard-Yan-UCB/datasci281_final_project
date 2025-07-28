@@ -34,6 +34,7 @@ from sklearn.model_selection import GridSearchCV
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn import svm
 from sklearn.linear_model import LogisticRegression
+from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis, LinearDiscriminantAnalysis
 from sklearn import metrics
 import time
 from xgboost import XGBClassifier
@@ -468,13 +469,19 @@ def get_tsne(X_list, n_components=2):
 def train_model(X_train, y_train, classes, model_type='logistic', feature='canny'):
 
     if model_type =='logistic':
-        model = LogisticRegression(multi_class='multinomial',solver='lbfgs',max_iter=1000)
+        params = {
+        'solver':['lbfgs','newton-cg'],
+        'max_iter':[1000, 1500]
+        }
+
+        logistic_model = LogisticRegression()
+        model = GridSearchCV(logistic_model, params, scoring='accuracy', cv=5, verbose=1)
         start_time = time.perf_counter()
         model.fit(X_train,y_train)
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
-        y_model_pred = model.predict(X_train)
-        y_model_pred_proba = model.predict_proba(X_train)
+        y_model_pred = model.best_estimator_.predict(X_train)
+        y_model_pred_proba = model.best_estimator_.predict_proba(X_train)
 
     elif model_type =='svm':
         svm_param_grid = {
@@ -543,7 +550,36 @@ def train_model(X_train, y_train, classes, model_type='logistic', feature='canny
         y_model_pred = model.best_estimator_.predict(X_train)
         y_model_pred_proba = model.best_estimator_.predict_proba(X_train)
 
-    # elif model_type == 'lda':
+    elif model_type == 'lda':
+        params = {
+        'solver':['svd','lsqr','eigen'],
+        'shrinkage':['auto']
+        }
+
+        lda_model = LinearDiscriminantAnalysis()
+
+        model = GridSearchCV(lda_model, params, cv=5, scoring='accuracy',verbose=1)
+        start_time = time.perf_counter()
+        model.fit(X_train, y_train)
+        end_time = time.perf_counter()
+        elapsed_time = end_time - start_time
+        y_model_pred = model.best_estimator_.predict(X_train)
+        y_model_pred_proba = model.best_estimator_.predict_proba(X_train)
+
+    elif model_type == 'qda':
+        params = {
+        'reg_param':np.linspace(start=0.5,stop=1,num=3)
+        }
+
+        qda_model = QuadraticDiscriminantAnalysis()
+
+        model = GridSearchCV(qda_model, params, cv=5, scoring='accuracy',verbose=2)
+        start_time = time.perf_counter()
+        model.fit(X_train, y_train)
+        end_time = time.perf_counter()
+        elapsed_time = end_time - start_time
+        y_model_pred = model.best_estimator_.predict(X_train)
+        y_model_pred_proba = model.best_estimator_.predict_proba(X_train)
 
 
     # Generate Confusion Matrix for Logistic Regression
@@ -619,10 +655,7 @@ def train_model(X_train, y_train, classes, model_type='logistic', feature='canny
     results_dict['training_time'] = elapsed_time
 
 
-    if model_type == 'logistic':
-        return model, results_dict
-    elif model_type in ('svm', 'gbm', 'xgboost', 'rf'):
-        return model.best_estimator_, results_dict
+    return model.best_estimator_, results_dict
 
 
 
@@ -722,4 +755,3 @@ def load_models(feature_list, model_path_prefix):
         feature_model_dict[feature] = joblib.load(path)
         print(f"loaded model={feature_model_dict[feature]} for feature={feature} from path={path}")
     return feature_model_dict
-
