@@ -550,7 +550,8 @@ def train_model(X_train, y_train, classes, model_type='logistic', feature='canny
     confusion_matrix = metrics.confusion_matrix(y_train, y_model_pred)
     cm_display = metrics.ConfusionMatrixDisplay(confusion_matrix = confusion_matrix, display_labels = classes)
     cm_display.plot()
-    plt.title('CM Feature:' + str(feature) + ' Model: ' + str(model_type))
+    plt.title('Training CM Feature:' + str(feature) + ' Model: ' + str(model_type))
+    plt.savefig('results_images/' + str(feature) + '_' + str(model_type)+'_training_confusion_matrix.png')
     plt.show()
 
     # # Handle classifier output format
@@ -583,6 +584,7 @@ def train_model(X_train, y_train, classes, model_type='logistic', feature='canny
     plt.title('ROC Curve Feature:' + str(feature) + ' Model: ' + str(model_type))
     plt.legend(loc='lower right')
     plt.grid(True)
+    plt.savefig('results_images/' + str(feature) + '_' + str(model_type)+'_training_roc.png')
     plt.show()
 
     accuracy_score = metrics.accuracy_score(y_train, y_model_pred)
@@ -635,7 +637,9 @@ def test_model(model, X_test_feature, Y_test, classes, model_type='logistic', fe
     confusion_matrix = metrics.confusion_matrix(Y_test, Y_test_predict)
     cm_display = metrics.ConfusionMatrixDisplay(confusion_matrix = confusion_matrix, display_labels = classes)
     cm_display.plot()
-    plt.title("CM Model: " + str(model_type) + " Feature: " + str(feature))
+    plt.title("CM Testing Model: " + str(model_type) + " Feature: " + str(feature))
+    plt.savefig('results_images/' + str(feature) + '_' + str(model_type)+'_training_confusion_matrix.png')
+
     plt.show()
 
 
@@ -663,9 +667,11 @@ def test_model(model, X_test_feature, Y_test, classes, model_type='logistic', fe
     plt.plot([0, 1], [0, 1], 'k--', label='Random chance')
     plt.xlabel('False Positive Rate')
     plt.ylabel('True Positive Rate')
-    plt.title('ROC Curve Feature:' + str(feature) + ' Model: ' + str(model_type))
+    plt.title('ROC Testing Curve Feature: ' + str(feature) + ' Model: ' + str(model_type))
     plt.legend(loc='lower right')
     plt.grid(True)
+    plt.savefig('results_images/' + str(feature) + '_' + str(model_type)+'_testing_roc.png')
+
     plt.show()
 
 
@@ -702,7 +708,7 @@ def save_models(feature_model_dict, model_path_prefix):
     """
     for feature in feature_model_dict.keys():
         model = feature_model_dict[feature]
-        path = f"{model_path_prefix}/"+f"{feature}.joblib"
+        path = f"{model_path_prefix}//"+f"{feature}.joblib"
         joblib.dump(model, path)
         print(f"saved model={model} for feature={feature} to path={path}")
 
