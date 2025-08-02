@@ -671,7 +671,7 @@ def test_model(model, X_test_feature, Y_test, classes, model_type='logistic', fe
     cm_display = metrics.ConfusionMatrixDisplay(confusion_matrix = confusion_matrix, display_labels = classes)
     cm_display.plot()
     plt.title("CM Testing Model: " + str(model_type) + " Feature: " + str(feature))
-    plt.savefig('results_images/' + str(feature) + '_' + str(model_type)+'_training_confusion_matrix.png')
+    plt.savefig('results_images/' + str(feature) + '_' + str(model_type)+'_testing_confusion_matrix.png')
 
     plt.show()
 
