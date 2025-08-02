@@ -40,6 +40,11 @@ import time
 from xgboost import XGBClassifier
 from sklearn.preprocessing import label_binarize, LabelEncoder
 from typing import List, Tuple, Dict, Any, Optional
+from sklearn.svm import SVC
+from sklearn.base import BaseEstimator
+from sklearn.metrics import accuracy_score
+import ast  
+
 
 """ create a 2-D gaussian blurr filter for a given mean and std """
 def create_2d_gaussian(size=9, std=1.5):
@@ -773,56 +778,61 @@ def load_models(feature_list, model_path_prefix):
 
 
 
+
 def clean_df(
     df: pd.DataFrame,
     label_col: str,
     feat_cols: List[str],
-) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
+) -> Tuple[pd.DataFrame, Dict[str, int], Optional[LabelEncoder]]:
 
-    missing = [c for c in feat_cols + [label_col] if c not in df.columns]
+    """ clean_df, dims, enc = clean_df (
+    df=df,
+    label_col="target",
+    feat_cols=["feat_canny", "feat_vec", "feat_dog", "feat_doh"]
+    )"""
 
-    def _parse_npstr(s: str) -> np.ndarray:
-        s = str(s).strip()
-        if s.startswith("np.str_(") and s.endswith(")"):
-            s = s[len("np.str_("):-1].strip()
-            if len(s) >= 2 and s[0] in "'\"" and s[-1] == s[0]:
-                s = s[1:-1]
-        s = s.replace("\n", " ").strip().lstrip("[").rstrip("]")
-        arr = np.fromstring(s, sep=" ")
-        return arr.astype(np.float32)
+    def _to_array(x) -> np.ndarray:
+        if isinstance(x, str):
+            try:
+                return np.asarray(ast.literal_eval(x), dtype=np.float32)
+            except (ValueError, SyntaxError):
+                return np.fromstring(x.strip("[]"), sep=" ", dtype=np.float32)
 
-    def to_float_array(x):
-        if isinstance(x, np.ndarray):
-            return x.astype(np.float32, copy=False)
-        if isinstance(x, (list, tuple)):
+        if isinstance(x, (list, tuple, np.ndarray)):
             return np.asarray(x, dtype=np.float32)
-        if isinstance(x, (str, np.str_)):
-            return _parse_npstr(x)
+
         return np.asarray([x], dtype=np.float32)
 
-    def to_scalar(v):
-        if isinstance(v, np.ndarray):
-            v = v.item()
-        elif isinstance(v, (list, tuple)) and len(v) == 1:
-            v = v[0]
-        return v
+
+    missing = [c for c in feat_cols + [label_col] if c not in df.columns]
+    if missing:
+        raise KeyError(f"Missing columns: {missing}")
 
     cleaned = df.copy(deep=True)
     dims: Dict[str, int] = {}
 
     for col in feat_cols:
-
-        arrs = cleaned[col].apply(to_float_array)
+        arrs    = cleaned[col].apply(_to_array)
         lengths = arrs.map(len)
-        k = lengths.iloc[0]
-        dims[col] = k
-
+        if lengths.nunique() != 1:
+            raise ValueError(
+                f"Inconsistent vector lengths in '{col}':\n{lengths.value_counts()}"
+            )
         cleaned[col] = arrs
+        dims[col]    = lengths.iloc[0]
 
-    y_series = cleaned[label_col].apply(to_scalar)
+    def _to_scalar(v):
+        if isinstance(v, np.ndarray):
+            return v.item()
+        if isinstance(v, (list, tuple)) and len(v) == 1:
+            return v[0]
+        return v
+
+    y_series  = cleaned[label_col].apply(_to_scalar)
     y_numeric = pd.to_numeric(y_series, errors="coerce")
-    numeric_ok = y_numeric.notna().all() and np.all(
-        np.isclose(y_numeric, np.round(y_numeric))
+
+    numeric_ok = y_numeric.notna().all() and np.allclose(
+        y_numeric, np.round(y_numeric)
     )
 
     encoder: Optional[LabelEncoder] = None
@@ -834,4 +844,114 @@ def clean_df(
             encoder.fit_transform(y_series.astype(str)).astype(np.int32)
         )
 
-    return cleaned
+    return cleaned, dims, encoder
+
+
+
+def ensemble_model(
+    model_specs: Dict[str, Tuple[BaseEstimator, np.ndarray, np.ndarray]],
+    X_test_dict: Dict[str, np.ndarray],
+    y_train: np.ndarray,
+    y_val:   np.ndarray,
+    y_test:  np.ndarray,
+    meta_model: BaseEstimator = None
+) -> Dict[str, Any]:
+    """
+    Train base learners on (train, val) matrices in `model_specs`,
+    evaluate on a test-set per model in `X_test_dict`, then stack via a meta-classifier.
+
+    Parameters:
+    model_specs  : dict
+        name -> (estimator, X_train, X_val)
+    X_test_dict  : dict
+        name -> X_test   (must have the same keys as model_specs)
+    y_*          : label vectors, one per split
+    verbose      : print per-model val accuracy and final test accuracy
+
+    Returns:
+    dict with trained objects, predictions, and stacked matrices.
+    
+    
+    Example call:
+    y = clean_df["target"].to_numpy()
+    X_canny_all = np.vstack(clean_df["feat_canny"].values)   # (n_samples, n_canny_feats)
+    X_vec_all   = np.vstack(clean_df["feat_vec"].values)     # (n_samples, n_vec_feats)
+
+    X_canny_train, X_canny_temp, X_vec_train, X_vec_temp, y_train, y_temp = train_test_split(
+        X_canny_all, X_vec_all, y,
+        test_size=0.20, random_state=42, stratify=y
+    )
+    X_canny_val, X_canny_test, X_vec_val, X_vec_test, y_val, y_test = train_test_split(
+        X_canny_temp, X_vec_temp, y_temp,
+        test_size=0.50, random_state=42, stratify=y_temp
+    )
+
+    model_specs = {
+        "canny": (
+            LogisticRegression(max_iter=1000),   # estimator
+            X_canny_train,                       # train matrix
+            X_canny_val                          # val matrix
+        ),
+        "vec": (
+            SVC(kernel="linear", probability=True, max_iter=1000, random_state=42),
+            X_vec_train,
+            X_vec_val
+        )
+    }
+    # Separate dict holding the per-model test matrices
+    X_test_dict = {
+        "canny": X_canny_test,
+        "vec":   X_vec_test
+    }
+    results = ensemble_model(
+        model_specs=model_specs,
+        X_test_dict=X_test_dict,
+        y_train=y_train,
+        y_val=y_val,
+        y_test=y_test,
+        meta_model=LogisticRegression(max_iter=1000)
+    )
+    print("Ensemble test accuracy:", (results["y_pred"] == y_test).mean())
+
+    
+    """
+
+    base_models, val_columns, test_columns = {}, [], []
+
+    # Fit base models & get probs 
+    for name, (model, X_tr, X_val) in model_specs.items():
+        model.fit(X_tr, y_train)
+        base_models[name] = model
+
+        val_prob  = model.predict_proba(X_val)
+        test_prob = model.predict_proba(X_test_dict[name])
+
+        val_columns.append(val_prob)
+        test_columns.append(test_prob)
+
+        acc = accuracy_score(y_val, np.argmax(val_prob, axis=1))
+        print(f"[{name}] val-acc: {acc:0.4f}")
+
+    # Stack prob matrices
+    val_stack  = np.hstack(val_columns)
+    test_stack = np.hstack(test_columns)
+
+    # Train meta-model on stacked val outputs
+    meta_model.fit(val_stack, y_val)
+
+    # Final test-set preds
+    y_pred  = meta_model.predict(test_stack)
+    y_score = meta_model.predict_proba(test_stack)
+
+
+    acc = accuracy_score(y_test, y_pred)
+    print(f"[Ensemble] test-acc: {acc:0.4f}")
+
+    return {
+        "meta_model": meta_model,
+        "base_models": base_models,
+        "y_pred": y_pred,
+        "y_score": y_score,
+        "val_stack": val_stack,
+        "test_stack": test_stack,
+    }
