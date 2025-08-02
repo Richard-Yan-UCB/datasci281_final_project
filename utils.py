@@ -38,7 +38,8 @@ from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis, LinearD
 from sklearn import metrics
 import time
 from xgboost import XGBClassifier
-from sklearn.preprocessing import label_binarize
+from sklearn.preprocessing import label_binarize, LabelEncoder
+from typing import List, Tuple, Dict, Any, Optional
 
 """ create a 2-D gaussian blurr filter for a given mean and std """
 def create_2d_gaussian(size=9, std=1.5):
@@ -274,7 +275,8 @@ def get_features(in_imgs: Optional[np.ndarray],
                  return_bundle: bool = False):
     features = []
     if feat_name == 'canny':
-        for i in tqdm(range(in_imgs.shape[0]), desc = 'Canny Edge Images'):
+        #for i in tqdm(range(in_imgs.shape[0]), desc = 'Canny Edge Images'):
+        for i in range(in_imgs.shape[0]):
             image = in_imgs[i]
             img_uint8 = (image * 255).astype(np.uint8)
             edges = cv.Canny(img_uint8, threshold1=50, threshold2=150)
@@ -289,7 +291,8 @@ def get_features(in_imgs: Optional[np.ndarray],
         # stack extracted hog features into array
         # also save the first hog image for plotting
         max_features = 0
-        for i in tqdm(range(in_imgs.shape[0]), desc = 'Blob Dog Images'):
+        #for i in tqdm(range(in_imgs.shape[0]), desc = 'Blob Dog Images'):
+        for i in range(in_imgs.shape[0]):
             #print("Blob DoG Image:" + str(i))
             image = in_imgs[i]
             mean_pixel_intensity = np.mean(image)
@@ -351,7 +354,8 @@ def get_features(in_imgs: Optional[np.ndarray],
     
     if feat_name == 'blob_doh':
         max_features = 0
-        for i in tqdm(range(in_imgs.shape[0]), desc = 'Blob DoH images'):
+        #for i in tqdm(range(in_imgs.shape[0]), desc = 'Blob DoH images'):
+        for i in range(in_imgs.shape[0]):
             #print("DoH Image: " + str(i))
             image = in_imgs[i]
             mean_pixel_intensity = np.mean(image)
@@ -761,3 +765,73 @@ def load_models(feature_list, model_path_prefix):
         feature_model_dict[feature] = joblib.load(path)
         print(f"loaded model={feature_model_dict[feature]} for feature={feature} from path={path}")
     return feature_model_dict
+
+
+
+
+
+
+
+
+def clean_df(
+    df: pd.DataFrame,
+    label_col: str,
+    feat_cols: List[str],
+) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
+
+    missing = [c for c in feat_cols + [label_col] if c not in df.columns]
+
+    def _parse_npstr(s: str) -> np.ndarray:
+        s = str(s).strip()
+        if s.startswith("np.str_(") and s.endswith(")"):
+            s = s[len("np.str_("):-1].strip()
+            if len(s) >= 2 and s[0] in "'\"" and s[-1] == s[0]:
+                s = s[1:-1]
+        s = s.replace("\n", " ").strip().lstrip("[").rstrip("]")
+        arr = np.fromstring(s, sep=" ")
+        return arr.astype(np.float32)
+
+    def to_float_array(x):
+        if isinstance(x, np.ndarray):
+            return x.astype(np.float32, copy=False)
+        if isinstance(x, (list, tuple)):
+            return np.asarray(x, dtype=np.float32)
+        if isinstance(x, (str, np.str_)):
+            return _parse_npstr(x)
+        return np.asarray([x], dtype=np.float32)
+
+    def to_scalar(v):
+        if isinstance(v, np.ndarray):
+            v = v.item()
+        elif isinstance(v, (list, tuple)) and len(v) == 1:
+            v = v[0]
+        return v
+
+    cleaned = df.copy(deep=True)
+    dims: Dict[str, int] = {}
+
+    for col in feat_cols:
+
+        arrs = cleaned[col].apply(to_float_array)
+        lengths = arrs.map(len)
+        k = lengths.iloc[0]
+        dims[col] = k
+
+        cleaned[col] = arrs
+
+    y_series = cleaned[label_col].apply(to_scalar)
+    y_numeric = pd.to_numeric(y_series, errors="coerce")
+    numeric_ok = y_numeric.notna().all() and np.all(
+        np.isclose(y_numeric, np.round(y_numeric))
+    )
+
+    encoder: Optional[LabelEncoder] = None
+    if numeric_ok:
+        cleaned[label_col] = y_numeric.astype(np.int32)
+    else:
+        encoder = LabelEncoder()
+        cleaned[label_col] = (
+            encoder.fit_transform(y_series.astype(str)).astype(np.int32)
+        )
+
+    return cleaned
