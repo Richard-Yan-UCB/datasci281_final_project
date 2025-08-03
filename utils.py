@@ -594,6 +594,29 @@ def clean_df(
 
     return cleaned, dims, encoder
 
+def parse_aligned_features(aligned_df, features):
+    """
+    Args:
+        aligned_df: output pandas dataframe from clean_df()
+        features: list of feature names to parse numpy arrays for
+    Returns:
+        dictionary mapping column names from pandas aligned_df to corresponding numpy arrays/matrices
+        i.e. {"filepaths": <numpy array>, "target": <numpy array>, "feat_vec": <numpy matrix>, ...}
+        
+    """
+    result_dict = {}
+    result_dict['filepath'] = aligned_df[['filepath']].to_numpy()
+    result_dict['target'] = aligned_df['target'].to_numpy()
+    for feature in features:
+        feature_values = aligned_df[[feature]].to_numpy()
+        result_feature_values = []
+        # extract inner feature vector
+        for i in range(len(feature_values)):
+            result_feature_values.append(feature_values[i][0].tolist())
+        result_feature_values = np.array(result_feature_values)
+        result_dict[feature] = result_feature_values
+    return result_dict
+
 ##############################
 # Feature dimensionality EDA #
 ##############################
@@ -783,7 +806,10 @@ def train_model(X_train, y_train, classes, model_type='logistic', feature='canny
     cm_display = metrics.ConfusionMatrixDisplay(confusion_matrix = confusion_matrix, display_labels = classes)
     cm_display.plot()
     plt.title('Training CM Feature:' + str(feature) + ' Model: ' + str(model_type))
-    plt.savefig('results_images/' + str(feature) + '_' + str(model_type)+'_training_confusion_matrix.png')
+    save_dir = 'results_images'
+    save_path = os.path.join(save_dir, str(feature) + '_' + str(model_type)+'_training_confusion_matrix.png')
+    os.makedirs(save_dir, exist_ok=True)
+    plt.savefig(save_path)
     plt.show()
 
     # # Handle classifier output format
@@ -816,7 +842,10 @@ def train_model(X_train, y_train, classes, model_type='logistic', feature='canny
     plt.title('ROC Curve Feature:' + str(feature) + ' Model: ' + str(model_type))
     plt.legend(loc='lower right')
     plt.grid(True)
-    plt.savefig('results_images/' + str(feature) + '_' + str(model_type)+'_training_roc.png')
+    save_dir = 'results_images'
+    save_path = os.path.join(save_dir, str(feature) + '_' + str(model_type)+'_training_roc.png')
+    os.makedirs(save_dir, exist_ok=True)
+    plt.savefig(save_path)
     plt.show()
 
     accuracy_score = metrics.accuracy_score(y_train, y_model_pred)
@@ -974,7 +1003,10 @@ def test_model(model, X_test_feature, Y_test, classes, model_type='logistic', fe
     cm_display = metrics.ConfusionMatrixDisplay(confusion_matrix = confusion_matrix, display_labels = classes)
     cm_display.plot()
     plt.title("CM Testing Model: " + str(model_type) + " Feature: " + str(feature))
-    plt.savefig('results_images/' + str(feature) + '_' + str(model_type)+'_training_confusion_matrix.png')
+    save_dir = 'results_images'
+    save_path = os.path.join(save_dir, str(feature) + '_' + str(model_type)+'_testing_confusion_matrix.png')
+    os.makedirs(save_dir, exist_ok=True)
+    plt.savefig(save_path)
     plt.show()
 
 
@@ -1005,7 +1037,10 @@ def test_model(model, X_test_feature, Y_test, classes, model_type='logistic', fe
     plt.title('ROC Testing Curve Feature: ' + str(feature) + ' Model: ' + str(model_type))
     plt.legend(loc='lower right')
     plt.grid(True)
-    plt.savefig('results_images/' + str(feature) + '_' + str(model_type)+'_testing_roc.png')
+    save_dir = 'results_images'
+    save_path = os.path.join(save_dir, str(feature) + '_' + str(model_type)+'_testing_roc.png')
+    os.makedirs(save_dir, exist_ok=True)
+    plt.savefig(save_path)
 
     plt.show()
 
@@ -1046,7 +1081,8 @@ def save_models(feature_model_dict, model_path_prefix):
     """
     for feature in feature_model_dict.keys():
         model = feature_model_dict[feature]
-        path = f"{model_path_prefix}//"+f"{feature}.joblib"
+        os.makedirs("models", exist_ok=True)
+        path = f"models/{model_path_prefix}_{feature}.joblib"
         joblib.dump(model, path)
         print(f"saved model={model} for feature={feature} to path={path}")
 
@@ -1058,11 +1094,11 @@ def load_models(feature_list, model_path_prefix):
         feature_list: list of feature type(s) to load model(s) for
         model_path_prefix: file path prefix to identify model(s) being loaded. e.g. "logistic_model".
     Returns:
-        feature_model_dict: dictionary of feature types to sklearn models. e.g. {'canny', canny_logistic_model, 'complex': complex_logistic_model}
+        feature_model_dict: dictionary of feature types to sklearn models. e.g. {'canny': canny_logistic_model, 'complex': complex_logistic_model}
     """
     feature_model_dict = {}
     for feature in feature_list:
-        path = f"{model_path_prefix}_{feature}.joblib"
+        path = f"models/{model_path_prefix}_{feature}.joblib"
         feature_model_dict[feature] = joblib.load(path)
         print(f"loaded model={feature_model_dict[feature]} for feature={feature} from path={path}")
     return feature_model_dict
