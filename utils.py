@@ -535,27 +535,20 @@ def clean_df(
 
     def _to_array(x: Union[str, list, tuple, np.ndarray]) -> np.ndarray:
 
-    # Already a list / tuple / np.ndarray → just cast
+
         if isinstance(x, (list, tuple, np.ndarray)):
             return np.asarray(x, dtype=np.float32)
 
-        # Anything else – treat as string
         if isinstance(x, str):
             s = x.strip()
-
-            # 1) Try to parse as a normal Python literal first
             try:
                 parsed = ast.literal_eval(s)
                 return np.asarray(parsed, dtype=np.float32)
             except Exception:
-                pass  # fall through
-
-            # 2) Normalise the weird new format and feed to np.fromstring
+                pass 
             s = s.lstrip("[").rstrip("]")
             s = re.sub(r"[,'\"\[\]]", " ", s)        # drop quotes & commas
             return np.fromstring(s, sep=" ", dtype=np.float32)
-
-        # Fallback: wrap single scalar in an array
         return np.asarray([x], dtype=np.float32)
 
 
