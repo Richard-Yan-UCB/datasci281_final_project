@@ -39,11 +39,14 @@ from sklearn import metrics
 import time
 from xgboost import XGBClassifier
 from sklearn.preprocessing import label_binarize, LabelEncoder
-from typing import List, Tuple, Dict, Any, Optional
+from typing import List, Tuple, Dict, Any, Optional, Union
 from sklearn.svm import SVC
 from sklearn.base import BaseEstimator
 from sklearn.metrics import accuracy_score
 import ast  
+import re
+
+
 
 ########################
 # Image pre-processing #
@@ -530,16 +533,29 @@ def clean_df(
     feat_cols=["feat_canny", "feat_vec", "feat_dog", "feat_doh"]
     )"""
 
-    def _to_array(x) -> np.ndarray:
-        if isinstance(x, str):
-            try:
-                return np.asarray(ast.literal_eval(x), dtype=np.float32)
-            except (ValueError, SyntaxError):
-                return np.fromstring(x.strip("[]"), sep=" ", dtype=np.float32)
+    def _to_array(x: Union[str, list, tuple, np.ndarray]) -> np.ndarray:
 
+    # Already a list / tuple / np.ndarray → just cast
         if isinstance(x, (list, tuple, np.ndarray)):
             return np.asarray(x, dtype=np.float32)
 
+        # Anything else – treat as string
+        if isinstance(x, str):
+            s = x.strip()
+
+            # 1) Try to parse as a normal Python literal first
+            try:
+                parsed = ast.literal_eval(s)
+                return np.asarray(parsed, dtype=np.float32)
+            except Exception:
+                pass  # fall through
+
+            # 2) Normalise the weird new format and feed to np.fromstring
+            s = s.lstrip("[").rstrip("]")
+            s = re.sub(r"[,'\"\[\]]", " ", s)        # drop quotes & commas
+            return np.fromstring(s, sep=" ", dtype=np.float32)
+
+        # Fallback: wrap single scalar in an array
         return np.asarray([x], dtype=np.float32)
 
 
@@ -845,7 +861,6 @@ def train_model(X_train, y_train, classes, model_type='logistic', feature='canny
 
 
     return model.best_estimator_, results_dict
-
 
 def ensemble_model(
     model_specs: Dict[str, Tuple[BaseEstimator, np.ndarray, np.ndarray]],
