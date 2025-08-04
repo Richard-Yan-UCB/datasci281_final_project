@@ -1079,7 +1079,7 @@ def test_model(model, X_test_feature, Y_test, classes, model_type='logistic', fe
 # Model saving/loading #
 ########################
 
-def save_models(feature_model_dict, model_path_prefix):
+def save_models(feature_model_dict):
     """
     Saves sklearn model(s) from feature_model_dict to path(s) with specified model_path_prefix.
     Args:
@@ -1089,7 +1089,7 @@ def save_models(feature_model_dict, model_path_prefix):
     for feature in feature_model_dict.keys():
         model = feature_model_dict[feature]
         os.makedirs("models", exist_ok=True)
-        path = f"models/{model_path_prefix}_{feature}.joblib"
+        path = f"models/{feature}.joblib"
         joblib.dump(model, path)
         print(f"saved model={model} for feature={feature} to path={path}")
 
