@@ -656,10 +656,15 @@ def get_tsne(X_list, n_components=2):
     xtsne_list.append(X_tsne)
   return xtsne_list
 
+
 def plot_classes(X, y, title):
     """
     Plots 2D or 3D scatter plot of X, color-differentiated according to y.
     """
+    le = LabelEncoder()
+    le.fit(y)
+    y_enc = le.transform(y)
+
     fig = plt.figure(figsize=(10,10))
     if X.shape[1] > 2:
         ax = fig.add_subplot(projection='3d')
@@ -668,16 +673,18 @@ def plot_classes(X, y, title):
 
     # color code each cluster (person ID)
     colormap = plt.cm.tab20
-    colorst = [colormap(i) for i in np.linspace(0, 1.0, len(np.unique(y)))]
+    colorst = [colormap(i) for i in np.linspace(0, 1.0, len(np.unique(y_enc)))]
 
     # project the features into 2 or 3 dimensions
-    for k in range(len(np.unique(y))):
+    for k in np.unique(y_enc):
+        label = le.classes_[k]
         if X.shape[1] > 2:
-            ax.scatter(X[y==k, 0], X[y==k, 1], X[y==k, 2], alpha=0.5, facecolors=colorst[k])
+            ax.scatter(X[y_enc==k, 0], X[y_enc==k, 1], X[y_enc==k, 2], alpha=0.5, facecolors=colorst[k], label=label)
         else:
-            ax.scatter(X[y==k, 0], X[y==k, 1], alpha=0.5, facecolors=colorst[k])
+            ax.scatter(X[y_enc==k, 0], X[y_enc==k, 1], alpha=0.5, facecolors=colorst[k], label=label)
 
     ax.set_title(title)
+    ax.legend()
 
 
 ##########################
