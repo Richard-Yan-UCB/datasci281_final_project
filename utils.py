@@ -605,23 +605,17 @@ def parse_aligned_features(aligned_df, features):
         
     """
     result_dict = {}
-    result_dict['filepath'] = aligned_df[['filepath']].to_numpy()
+    result_dict['filepath'] = aligned_df['filepath'].to_numpy()
     result_dict['target'] = aligned_df['target'].to_numpy()
     for feature in features:
-        feature_values = aligned_df[[feature]].to_numpy()
-        result_feature_values = []
-        # extract inner feature vector
-        for i in range(len(feature_values)):
-            result_feature_values.append(feature_values[i][0].tolist())
-        result_feature_values = np.array(result_feature_values)
-        result_dict[feature] = result_feature_values
+        result_dict[feature] = np.vstack(aligned_df[feature].values)
     return result_dict
 
 ##############################
 # Feature dimensionality EDA #
 ##############################
 
-def get_PCA(X_list, n_components=[15,15,100]):
+def get_PCA(X_list, n_components=[14,14,100,100]):
     pca_list = []
     xpca_list = []
     for index, X in enumerate(X_list):
@@ -631,16 +625,12 @@ def get_PCA(X_list, n_components=[15,15,100]):
         xpca_list.append(X_pca)
     return pca_list, xpca_list
 
-def plot_PCA(X_list, n_components=[15,15,100]):
+def plot_PCA(X_list, n_components=[14,14,100,100], labels=['dog features', 'doh features','canny features','complex features'], colors=['r-', 'b-','g-','p-']):
     pca_list, xpca_list = get_PCA(X_list, n_components=n_components)
 
     plt.figure(figsize=(15,5))
-    colors = ['r-', 'b-','g-','p-']
-    labels = ['dog features', 'doh features','canny_features','complex_features']
     for i in range(len(X_list)):
         plt.plot(np.cumsum(pca_list[i].explained_variance_ratio_), colors[i], label=labels[i])
-        plt.xticks(np.linspace(0, n_components[i]+1, 50))
-        plt.yticks(np.linspace(0, 1.2, 8))
         plt.grid(True)
         plt.xlabel('Number of components')
         plt.ylabel('Explained Variances')
