@@ -45,6 +45,7 @@ from sklearn.base import BaseEstimator
 from sklearn.metrics import accuracy_score
 import ast  
 import re
+from scipy.stats import mode
 
 
 
@@ -989,6 +990,34 @@ def ensemble_model(
         "test_stack": test_stack,
     }
 
+class FeatureVectorEnsemble:
+    def __init__(self, models, feature_sets, use_proba=False):
+        self.models = models
+        self.feature_sets = feature_sets
+        self.use_proba = use_proba  # True = probability averaging, False = majority vote
+
+    def predict(self, idx):
+        """
+        Predicts label for image at index `idx` using the ensemble.
+        """
+        preds = []
+
+        for model, X in zip(self.models, self.feature_sets):
+            x = X[idx].reshape(1, -1)
+            if self.use_proba:
+                proba = model.predict_proba(x)
+                preds.append(proba)
+            else:
+                pred = model.predict(x)[0]
+                preds.append(pred)
+
+        if self.use_proba:
+            avg_proba = np.mean(preds, axis=0)
+            return np.argmax(avg_proba)
+        else:
+            majority_vote, _ = mode(preds)
+            return majority_vote[0]
+        
 
 def test_model(model, X_test_feature, Y_test, classes, model_type='logistic', feature='canny'):
     start_time = time.perf_counter()
