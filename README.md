@@ -6,9 +6,11 @@ Section 1
 **Authors**: Richard Yan, Jacqueline Yeung, Vinith Kuruppu, Eduardo Jose Villasenor
 
 ## Structure
-### Main Notebook
-Modeling Notebook: [2. model_building.ipynb](https://github.com/Richard-Yan-UCB/datasci281_final_project/blob/99a22decef31ae27fb2acd9810e9e36b332a74b4/2.%20model_building.ipynb)
+### Deliverables
+Main Modeling Notebook: [2. model_building.ipynb](https://github.com/Richard-Yan-UCB/datasci281_final_project/blob/99a22decef31ae27fb2acd9810e9e36b332a74b4/2.%20model_building.ipynb)
 - This is our main notebook, which contains our modeling framework, with references to supplementary notebooks for feature engineering.
+
+Final Report: [Brain Tumor Classification Report.pdf](https://github.com/Richard-Yan-UCB/datasci281_final_project/blob/36e79fa4a28b9fb0f30b58f123c493d346b3cbef/Brain%20Tumor%20Classification%20Report.pdf)
 
 ### Supplementary Notebooks
 These notebooks contain code for feature exploration and engineering.
